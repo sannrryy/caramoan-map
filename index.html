@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Caramoan Barangay Map</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <header class="panel brand">
+      <div class="kicker">Camarines Sur · Coverage map</div>
+      <h1>Caramoan</h1>
+      <p>Peach is mainland. Teal is island.</p>
+      <div class="stats">
+        <div class="stat">
+          <b id="land-count">—</b>
+          <span>Mainland</span>
+        </div>
+        <div class="stat">
+          <b id="island-count">—</b>
+          <span>Island</span>
+        </div>
+      </div>
+      <input id="search" class="search" type="search" placeholder="Search barangay" autocomplete="off" />
+      <button type="button" id="reset-view" class="reset">Show all barangays</button>
+    </header>
+
+    <aside class="panel list-wrap">
+      <div class="list-head">
+        <span>Barangays</span>
+        <span class="filters">
+          <button type="button" class="active" data-filter="all">All</button>
+          <button type="button" data-filter="mainland">Land</button>
+          <button type="button" data-filter="island">Island</button>
+        </span>
+      </div>
+      <ul id="barangay-list"></ul>
+    </aside>
+
+    <div class="basemap">
+      <button type="button" class="active" data-basemap="streets">Map</button>
+      <button type="button" data-basemap="satellite">Satellite</button>
+    </div>
+
+    <div class="panel legend">
+      <strong>Barangay type</strong>
+      <div class="legend-keys">
+        <span><i style="background:#e8c4b0"></i> Mainland</span>
+        <span><i style="background:#9ecfc9"></i> Island</span>
+      </div>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="app.js"></script>
+  </body>
+</html>
