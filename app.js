@@ -152,30 +152,61 @@ function formatKm2(n) {
   return `${n.toFixed(1)} km²`;
 }
 
-// New: format distance helper
 function formatDistance(meters) {
   if (meters == null || !isFinite(meters)) return "—";
   if (meters < 1000) return `${Math.round(meters)} m`;
   return `${(meters / 1000).toFixed(2)} km`;
 }
 
-// New: get approximate polygon center (average of outer ring coords)
+function polygonCentroid(ring) {
+  let signedArea = 0;
+  let cx = 0;
+  let cy = 0;
+
+  for (let i = 0; i < ring.length - 1; i++) {
+    const [x1, y1] = ring[i];
+    const [x2, y2] = ring[i + 1];
+    const cross = x1 * y2 - x2 * y1;
+    signedArea += cross;
+    cx += (x1 + x2) * cross;
+    cy += (y1 + y2) * cross;
+  }
+
+  signedArea /= 2;
+  if (Math.abs(signedArea) < 1e-12) return null;
+
+  return [cx / (6 * signedArea), cy / (6 * signedArea)];
+}
+
 function getFeatureCenter(geometry) {
   if (!geometry) return null;
-  const coords =
+
+  const polygons =
     geometry.type === "Polygon"
-      ? geometry.coordinates[0]
+      ? [geometry.coordinates[0]]
       : geometry.type === "MultiPolygon"
-        ? geometry.coordinates[0][0]
+        ? geometry.coordinates.map((polygon) => polygon[0])
         : [];
-  if (!coords || !coords.length) return null;
-  let sumX = 0,
-    sumY = 0;
-  coords.forEach(([lng, lat]) => {
-    sumX += lng;
-    sumY += lat;
+
+  if (!polygons.length) return null;
+
+  let best = null;
+  let bestArea = -Infinity;
+
+  polygons.forEach((ring) => {
+    const centroid = polygonCentroid(ring);
+    if (!centroid) return;
+
+    const area = Math.abs(ringArea(ring) / 2);
+    if (area > bestArea) {
+      bestArea = area;
+      best = centroid;
+    }
   });
-  return [sumX / coords.length, sumY / coords.length]; // [lng, lat]
+
+  if (!best) return null;
+
+  return [best[0], best[1]]; // [lng, lat]
 }
 
 const streets = L.tileLayer(
@@ -208,7 +239,6 @@ L.control.scale({ metric: true, imperial: false }).addTo(map);
 const SPX_HUB = { lat: 13.7741485, lng: 123.8634766 };
 const hubLatLng = L.latLng(SPX_HUB.lat, SPX_HUB.lng);
 
-// Add hub marker and optional reference circles
 const hubMarker = L.marker(hubLatLng, { title: "SPX Hub (Caramoan)", riseOnHover: true }).addTo(map);
 hubMarker.bindPopup("SPX Hub (Tawog / near Katery)");
 L.circle(hubLatLng, { radius: 1000, color: '#3388ff', weight: 1, fillOpacity: 0.03 }).addTo(map);
@@ -293,7 +323,7 @@ function fillList(items) {
       rows.forEach((item) => {
         const li = document.createElement("li");
         li.dataset.name = item.name;
-        li.innerHTML = `<span class="swatch" style="background:${TYPE_COLORS[item.kind]}"></span><span class="name">${item.name}</span><span class="area">${formatKm2(item.area)} · ${formatDistance(item.distanceKm*1000)}</span>`;
+        li.innerHTML = `<span class="swatch" style="background:${TYPE_COLORS[item.kind]}"></span><span class="name">${item.name}</span><span class="area">${formatKm2(item.area)} · ${formatDistance(item.distanceKm * 1000)}</span>`;
         li.addEventListener("click", () => flyToBarangay(item.name));
         if (item.name === activeName) li.classList.add("active");
         listEl.appendChild(li);
@@ -327,7 +357,6 @@ document.getElementById("reset-view").addEventListener("click", () => {
 fetch("data/barangays.geojson")
   .then((res) => res.json())
   .then((geojson) => {
-    // compute displayName and area
     geojson.features.forEach((feature) => {
       const name = normalizeName(feature.properties.brgy_name);
       const area = geometryKm2(feature.geometry);
@@ -336,7 +365,6 @@ fetch("data/barangays.geojson")
       areaByName.set(name, area);
     });
 
-    // classify island/mainland
     const kinds = classifyLandmass(geojson.features);
     geojson.features.forEach((feature, i) => {
       const name = feature.properties.displayName;
@@ -344,9 +372,8 @@ fetch("data/barangays.geojson")
       typeByName.set(name, kinds[i]);
     });
 
-    // compute centers and distances to hub
     geojson.features.forEach((feature) => {
-      const center = getFeatureCenter(feature.geometry); // [lng, lat]
+      const center = getFeatureCenter(feature.geometry);
       if (center) {
         feature.properties.center = center;
         const ll = L.latLng(center[1], center[0]);
@@ -373,9 +400,8 @@ fetch("data/barangays.geojson")
         const area = feature.properties.areaKm2;
         const kind = feature.properties.kind;
         const kindLabel = kind === "island" ? "Island" : "Mainland";
-
         const distMeters = feature.properties.distanceMeters;
-        const distanceText = distMeters != null ? `Distance from SPX Hub: ${formatDistance(distMeters)}` : "Distance unavailable";
+        const distanceText = distMeters != null ? `Estimated straight-line distance from SPX Hub: ${formatDistance(distMeters)}` : "Distance unavailable";
 
         layerByName.set(name, lyr);
         lyr.bindPopup(
@@ -408,7 +434,6 @@ fetch("data/barangays.geojson")
           distanceKm,
         };
       })
-      // sort by distance then name
       .sort((a, b) => {
         if (a.distanceKm === b.distanceKm) return a.name.localeCompare(b.name);
         return a.distanceKm - b.distanceKm;
