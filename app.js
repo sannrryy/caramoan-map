@@ -152,6 +152,32 @@ function formatKm2(n) {
   return `${n.toFixed(1)} km²`;
 }
 
+// New: format distance helper
+function formatDistance(meters) {
+  if (meters == null || !isFinite(meters)) return "—";
+  if (meters < 1000) return `${Math.round(meters)} m`;
+  return `${(meters / 1000).toFixed(2)} km`;
+}
+
+// New: get approximate polygon center (average of outer ring coords)
+function getFeatureCenter(geometry) {
+  if (!geometry) return null;
+  const coords =
+    geometry.type === "Polygon"
+      ? geometry.coordinates[0]
+      : geometry.type === "MultiPolygon"
+        ? geometry.coordinates[0][0]
+        : [];
+  if (!coords || !coords.length) return null;
+  let sumX = 0,
+    sumY = 0;
+  coords.forEach(([lng, lat]) => {
+    sumX += lng;
+    sumY += lat;
+  });
+  return [sumX / coords.length, sumY / coords.length]; // [lng, lat]
+}
+
 const streets = L.tileLayer(
   "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
   {
@@ -177,6 +203,16 @@ const map = L.map("map", {
 
 L.control.zoom({ position: "bottomright" }).addTo(map);
 L.control.scale({ metric: true, imperial: false }).addTo(map);
+
+// SPX Hub coordinates (Tawog / near Katery)
+const SPX_HUB = { lat: 13.7741485, lng: 123.8634766 };
+const hubLatLng = L.latLng(SPX_HUB.lat, SPX_HUB.lng);
+
+// Add hub marker and optional reference circles
+const hubMarker = L.marker(hubLatLng, { title: "SPX Hub (Caramoan)", riseOnHover: true }).addTo(map);
+hubMarker.bindPopup("SPX Hub (Tawog / near Katery)");
+L.circle(hubLatLng, { radius: 1000, color: '#3388ff', weight: 1, fillOpacity: 0.03 }).addTo(map);
+L.circle(hubLatLng, { radius: 3000, color: '#3388ff', weight: 1, dashArray: '4 6', fillOpacity: 0 }).addTo(map);
 
 const layers = { streets, satellite };
 document.querySelectorAll("[data-basemap]").forEach((btn) => {
@@ -257,7 +293,7 @@ function fillList(items) {
       rows.forEach((item) => {
         const li = document.createElement("li");
         li.dataset.name = item.name;
-        li.innerHTML = `<span class="swatch" style="background:${TYPE_COLORS[item.kind]}"></span><span class="name">${item.name}</span><span class="area">${formatKm2(item.area)}</span>`;
+        li.innerHTML = `<span class="swatch" style="background:${TYPE_COLORS[item.kind]}"></span><span class="name">${item.name}</span><span class="area">${formatKm2(item.area)} · ${formatDistance(item.distanceKm*1000)}</span>`;
         li.addEventListener("click", () => flyToBarangay(item.name));
         if (item.name === activeName) li.classList.add("active");
         listEl.appendChild(li);
@@ -291,6 +327,7 @@ document.getElementById("reset-view").addEventListener("click", () => {
 fetch("data/barangays.geojson")
   .then((res) => res.json())
   .then((geojson) => {
+    // compute displayName and area
     geojson.features.forEach((feature) => {
       const name = normalizeName(feature.properties.brgy_name);
       const area = geometryKm2(feature.geometry);
@@ -299,11 +336,27 @@ fetch("data/barangays.geojson")
       areaByName.set(name, area);
     });
 
+    // classify island/mainland
     const kinds = classifyLandmass(geojson.features);
     geojson.features.forEach((feature, i) => {
       const name = feature.properties.displayName;
       feature.properties.kind = kinds[i];
       typeByName.set(name, kinds[i]);
+    });
+
+    // compute centers and distances to hub
+    geojson.features.forEach((feature) => {
+      const center = getFeatureCenter(feature.geometry); // [lng, lat]
+      if (center) {
+        feature.properties.center = center;
+        const ll = L.latLng(center[1], center[0]);
+        const distMeters = hubLatLng.distanceTo(ll);
+        feature.properties.distanceMeters = distMeters;
+        feature.properties.distanceKm = distMeters / 1000;
+      } else {
+        feature.properties.distanceMeters = null;
+        feature.properties.distanceKm = Infinity;
+      }
     });
 
     const layer = L.geoJSON(geojson, {
@@ -320,9 +373,13 @@ fetch("data/barangays.geojson")
         const area = feature.properties.areaKm2;
         const kind = feature.properties.kind;
         const kindLabel = kind === "island" ? "Island" : "Mainland";
+
+        const distMeters = feature.properties.distanceMeters;
+        const distanceText = distMeters != null ? `Distance from SPX Hub: ${formatDistance(distMeters)}` : "Distance unavailable";
+
         layerByName.set(name, lyr);
         lyr.bindPopup(
-          `<div class="popup"><h2>${name}</h2><p class="sub">${kindLabel} · ${formatKm2(area)}</p></div>`
+          `<div class="popup"><h2>${name}</h2><p class="sub">${kindLabel} · ${formatKm2(area)}</p><p class="sub">${distanceText}</p></div>`
         );
         lyr.bindTooltip(name, {
           permanent: true,
@@ -341,12 +398,21 @@ fetch("data/barangays.geojson")
     map.fitBounds(allBounds, { padding: [28, 28] });
 
     const items = [...layerByName.keys()]
-      .map((name) => ({
-        name,
-        area: areaByName.get(name),
-        kind: typeByName.get(name),
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .map((name) => {
+        const feature = geojson.features.find((f) => f.properties.displayName === name);
+        const distanceKm = feature && isFinite(feature.properties.distanceKm) ? feature.properties.distanceKm : Infinity;
+        return {
+          name,
+          area: areaByName.get(name),
+          kind: typeByName.get(name),
+          distanceKm,
+        };
+      })
+      // sort by distance then name
+      .sort((a, b) => {
+        if (a.distanceKm === b.distanceKm) return a.name.localeCompare(b.name);
+        return a.distanceKm - b.distanceKm;
+      });
 
     fillList(items);
     const islandCount = items.filter((item) => item.kind === "island").length;
